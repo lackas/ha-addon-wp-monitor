@@ -29,6 +29,10 @@ CSV_HEADER = "ts,total_w,a_w,b_w,c_w,a_a,b_a,c_a,a_v,b_v,c_v\n"
 WS_URL = "https://api.viessmann-climatesolutions.com/live-updates/v1/iot"
 WS_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
+# Shared counters for watchdog heartbeat
+shelly_count = 0
+viessmann_count = 0
+
 
 def load_options():
     with open("/data/options.json") as f:
@@ -43,6 +47,7 @@ def setup_output_dir():
 
 
 def shelly_thread(ip, poll_hz):
+    global shelly_count
     url = f"http://{ip}/rpc/EM.GetStatus?id=0"
     interval = 1.0 / poll_hz
     f = open(SHELLY_CSV, "a", buffering=1)
@@ -66,6 +71,7 @@ def shelly_thread(ip, poll_hz):
                 f",{d.get('c_voltage', '')}\n"
             )
             f.write(row)
+            shelly_count += 1
         except (URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
             log.warning("Shelly poll error: %s", e)
         next_tick += interval
@@ -80,9 +86,9 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
     subs = {"subscriptions": [
         {"id": "0", "type": "device-features", "gatewayId": gateway_id, "version": "2"},
     ]}
+    global viessmann_count
     mgr = ViCareOAuthManager(email, password, client_id, "/data/token.save")
     f = open(VIESSMANN_JSONL, "a", buffering=1)
-    count = 0
 
     while True:
         try:
@@ -122,12 +128,12 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
 
         @sio.on("disconnect", namespace=ns)
         def on_disconnect():
-            log.info("WS disconnected after %d events", count)
+            log.info("WS disconnected after %d events", viessmann_count)
 
         @sio.on("feature", namespace=ns)
         def feature_changed(data):
-            nonlocal count
-            count += 1
+            global viessmann_count
+            viessmann_count += 1
             last_msg_time[0] = time.time()
             feat = data.get("feature", {})
             name = feat.get("feature", "?")
@@ -194,8 +200,20 @@ def main():
     else:
         log.warning("ViCare credentials not configured, WS logger disabled")
 
+    log.info("Watchdog active — heartbeat every 60s")
     while True:
         time.sleep(60)
+
+        # Heartbeat
+        shelly_ok = "alive" if t_shelly.is_alive() else "DEAD"
+        ws_ok = "alive" if (t_viessmann and t_viessmann.is_alive()) else ("DEAD" if t_viessmann else "off")
+        csv_size = os.path.getsize(SHELLY_CSV) if os.path.exists(SHELLY_CSV) else 0
+        jsonl_size = os.path.getsize(VIESSMANN_JSONL) if os.path.exists(VIESSMANN_JSONL) else 0
+        log.info("Heartbeat: shelly=%s (%d rows), viessmann=%s (%d events), "
+                 "csv=%.1fMB, jsonl=%.1fMB",
+                 shelly_ok, shelly_count, ws_ok, viessmann_count,
+                 csv_size / 1048576, jsonl_size / 1048576)
+
         if not t_shelly.is_alive():
             log.error("Shelly thread died — restarting")
             t_shelly = threading.Thread(target=shelly_thread, args=(shelly_ip, shelly_hz),
