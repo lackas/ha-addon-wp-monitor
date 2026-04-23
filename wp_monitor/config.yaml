@@ -1,5 +1,5 @@
 name: WP Monitor
-version: "0.1.0"
+version: "0.1.1"
 slug: wp_monitor
 description: "High-resolution heat pump monitoring (Shelly 1Hz + Viessmann WebSocket)"
 arch:
