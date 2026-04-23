@@ -171,7 +171,7 @@ def main():
 
     shelly_ip = opts.get("shelly_ip", "192.168.1.136")
     shelly_hz = opts.get("shelly_poll_hz", 1)
-    ws_timeout = opts.get("ws_watchdog_timeout", 300)
+    ws_timeout = opts.get("watchdog_timeout_s", 120)
 
     log.info("Starting WP Monitor — Shelly %s @ %d Hz", shelly_ip, shelly_hz)
 
