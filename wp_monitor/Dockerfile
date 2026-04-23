@@ -1,5 +1,5 @@
 ARG BUILD_FROM
-FROM ${BUILD_FROM}
+FROM python:3.12-alpine
 
 RUN pip3 install --no-cache-dir \
     requests==2.32.3 \
@@ -9,7 +9,5 @@ RUN pip3 install --no-cache-dir \
 
 COPY wp_monitor.py /
 COPY PyViCareLive/ /PyViCareLive/
-COPY run.sh /
-RUN chmod a+x /run.sh
 
-CMD ["/run.sh"]
+ENTRYPOINT ["python3", "-u", "/wp_monitor.py"]
