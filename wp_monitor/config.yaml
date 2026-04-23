@@ -1,0 +1,26 @@
+name: WP Monitor
+version: "0.1.0"
+slug: wp_monitor
+description: "High-resolution heat pump monitoring (Shelly 1Hz + Viessmann WebSocket)"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+map:
+  - share:rw
+options:
+  shelly_ip: "192.168.1.136"
+  shelly_poll_hz: 1
+  vicare_email: ""
+  vicare_password: ""
+  vicare_client_id: ""
+  vicare_gateway_id: ""
+  watchdog_timeout_s: 120
+schema:
+  shelly_ip: str
+  shelly_poll_hz: "int(1,10)"
+  vicare_email: str
+  vicare_password: password
+  vicare_client_id: str
+  vicare_gateway_id: str
+  watchdog_timeout_s: "int(30,600)"
