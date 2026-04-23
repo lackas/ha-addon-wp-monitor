@@ -9,5 +9,7 @@ RUN pip3 install --no-cache-dir \
 
 COPY wp_monitor.py /
 COPY PyViCareLive/ /PyViCareLive/
+COPY run.sh /
+RUN chmod a+x /run.sh
 
-CMD ["python3", "-u", "/wp_monitor.py"]
+CMD ["/run.sh"]
