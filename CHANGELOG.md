@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3 (2026-04-29)
+
+- Fix `token_invalid` lockup: trigger `renewToken()` (fresh email/password login) when WS subscription fails with token error, instead of retrying forever
+
 ## 0.1.2 (2026-04-23)
 
 - Watchdog heartbeat every 60s with row/event counters and file sizes

@@ -101,6 +101,13 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
             log.info("WS subscription OK, namespace=%s", sub["namespace"])
         except Exception as e:
             log.error("WS subscription error: %s", e)
+            err_str = str(e).lower()
+            if "token_invalid" in err_str or "invalid_token" in err_str or "expired" in err_str:
+                try:
+                    mgr.renewToken()
+                    log.info("Token re-authenticated after invalid token error")
+                except Exception as renew_err:
+                    log.error("Token renewal failed: %s", renew_err)
             time.sleep(30)
             continue
 
