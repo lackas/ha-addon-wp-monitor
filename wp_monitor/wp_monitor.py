@@ -23,7 +23,6 @@ log = logging.getLogger("wp_monitor")
 
 OUTPUT_DIR = "/share/wp-monitor"
 SHELLY_CSV = os.path.join(OUTPUT_DIR, "shelly_brunnen.csv")
-VIESSMANN_JSONL = os.path.join(OUTPUT_DIR, "viessmann_ws.jsonl")
 CSV_HEADER = "ts,total_w,a_w,b_w,c_w,a_a,b_a,c_a,a_v,b_v,c_v\n"
 
 WS_URL = "https://api.viessmann-climatesolutions.com/live-updates/v1/iot"
@@ -31,7 +30,7 @@ WS_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
 # Shared counters for watchdog heartbeat
 shelly_count = 0
-viessmann_count = 0
+viessmann_counts = {}  # gateway_id -> count
 
 
 def load_options():
@@ -82,32 +81,36 @@ def shelly_thread(ip, poll_hz):
             next_tick = time.time()
 
 
-def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
+def viessmann_thread(email, password, client_id, gateway_id, output_file, watchdog_timeout):
+    """WebSocket logger for a single Viessmann gateway. One thread per gateway."""
     subs = {"subscriptions": [
         {"id": "0", "type": "device-features", "gatewayId": gateway_id, "version": "2"},
     ]}
-    global viessmann_count
-    mgr = ViCareOAuthManager(email, password, client_id, "/data/token.save")
-    f = open(VIESSMANN_JSONL, "a", buffering=1)
+    global viessmann_counts
+    viessmann_counts[gateway_id] = 0
+    token_file = f"/data/token_{gateway_id}.save"
+    mgr = ViCareOAuthManager(email, password, client_id, token_file)
+    f = open(output_file, "a", buffering=1)
+    gw_short = gateway_id[-6:]
 
     while True:
         try:
             resp = mgr.oauth_session.post(WS_URL, json.dumps(subs), headers=WS_HEADERS, timeout=30)
             if resp.status_code not in (200, 201):
-                log.error("WS subscription failed: %d %s", resp.status_code, resp.text[:200])
+                log.error("[%s] WS subscription failed: %d %s", gw_short, resp.status_code, resp.text[:200])
                 time.sleep(30)
                 continue
             sub = resp.json()
-            log.info("WS subscription OK, namespace=%s", sub["namespace"])
+            log.info("[%s] WS subscription OK, namespace=%s", gw_short, sub["namespace"])
         except Exception as e:
-            log.error("WS subscription error: %s", e)
+            log.error("[%s] WS subscription error: %s", gw_short, e)
             err_str = str(e).lower()
             if "token_invalid" in err_str or "invalid_token" in err_str or "expired" in err_str:
                 try:
                     mgr.renewToken()
-                    log.info("Token re-authenticated after invalid token error")
+                    log.info("[%s] Token re-authenticated after invalid token error", gw_short)
                 except Exception as renew_err:
-                    log.error("Token renewal failed: %s", renew_err)
+                    log.error("[%s] Token renewal failed: %s", gw_short, renew_err)
             time.sleep(30)
             continue
 
@@ -122,7 +125,7 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
                     return
                 silence = time.time() - last_msg_time[0]
                 if silence > watchdog_timeout:
-                    log.warning("WS watchdog: silent %ds, disconnecting", int(silence))
+                    log.warning("[%s] WS watchdog: silent %ds, disconnecting", gw_short, int(silence))
                     try:
                         sio.disconnect()
                     except Exception:
@@ -131,16 +134,15 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
 
         @sio.on("connect", namespace=ns)
         def on_connect():
-            log.info("WS connected")
+            log.info("[%s] WS connected", gw_short)
 
         @sio.on("disconnect", namespace=ns)
         def on_disconnect():
-            log.info("WS disconnected after %d events", viessmann_count)
+            log.info("[%s] WS disconnected after %d events", gw_short, viessmann_counts[gateway_id])
 
         @sio.on("feature", namespace=ns)
         def feature_changed(data):
-            global viessmann_count
-            viessmann_count += 1
+            viessmann_counts[gateway_id] += 1
             last_msg_time[0] = time.time()
             feat = data.get("feature", {})
             name = feat.get("feature", "?")
@@ -150,12 +152,12 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
             record = {"ts": ts, "feature": name, "values": vals}
             f.write(json.dumps(record, separators=(",", ":")) + "\n")
 
-        log.info("WS connecting to %s", sub["url"])
+        log.info("[%s] WS connecting to %s", gw_short, sub["url"])
         try:
             sio.connect(sub["url"], transports=["websocket"],
                         socketio_path=sub["path"], namespaces=ns)
         except Exception as e:
-            log.error("WS connection failed: %s", e)
+            log.error("[%s] WS connection failed: %s", gw_short, e)
             time.sleep(30)
             continue
 
@@ -164,17 +166,17 @@ def viessmann_thread(email, password, client_id, gateway_id, watchdog_timeout):
         try:
             sio.wait()
         except Exception as e:
-            log.warning("WS wait error: %s", e)
+            log.warning("[%s] WS wait error: %s", gw_short, e)
         finally:
             stop_watchdog.set()
 
-        log.info("WS reconnecting in 30s...")
+        log.info("[%s] WS reconnecting in 30s...", gw_short)
         time.sleep(30)
         try:
             mgr.renewToken()
-            log.info("WS token renewed")
+            log.info("[%s] WS token renewed", gw_short)
         except Exception as e:
-            log.warning("WS token renewal failed: %s, retry in 60s", e)
+            log.warning("[%s] WS token renewal failed: %s, retry in 60s", gw_short, e)
             time.sleep(60)
 
 
@@ -192,20 +194,42 @@ def main():
                                 name="shelly", daemon=True)
     t_shelly.start()
 
-    t_viessmann = None
+    # Viessmann WS — support multiple gateways
     email = opts.get("vicare_email")
     password = opts.get("vicare_password")
     client_id = opts.get("vicare_client_id")
-    gateway_id = opts.get("vicare_gateway_id")
-    if email and password:
-        log.info("Starting Viessmann WS logger for gateway %s", gateway_id)
-        t_viessmann = threading.Thread(
-            target=viessmann_thread,
-            args=(email, password, client_id, gateway_id, ws_timeout),
-            name="viessmann", daemon=True)
-        t_viessmann.start()
+    ws_timeout = opts.get("watchdog_timeout_s", 120)
+
+    # Build gateway list: new "vicare_gateways" (list of "id:name" strings)
+    # or legacy "vicare_gateway_id" (single string)
+    raw_gateways = opts.get("vicare_gateways", [])
+    gateways = []
+    for entry in raw_gateways:
+        if ":" in entry:
+            gw_id, gw_name = entry.split(":", 1)
+        else:
+            gw_id, gw_name = entry, entry[-6:]
+        gateways.append({"id": gw_id.strip(), "name": gw_name.strip()})
+    if not gateways:
+        legacy_gw = opts.get("vicare_gateway_id", "")
+        if legacy_gw:
+            gateways = [{"id": legacy_gw, "name": "wp"}]
+
+    viessmann_threads = {}
+    if email and password and gateways:
+        for gw in gateways:
+            gw_id = gw if isinstance(gw, str) else gw.get("id", "")
+            gw_name = gw.get("name", gw_id[-6:]) if isinstance(gw, dict) else gw_id[-6:]
+            output_file = os.path.join(OUTPUT_DIR, f"viessmann_{gw_name}.jsonl")
+            log.info("Starting Viessmann WS for %s (gateway %s) -> %s", gw_name, gw_id, output_file)
+            t = threading.Thread(
+                target=viessmann_thread,
+                args=(email, password, client_id, gw_id, output_file, ws_timeout),
+                name=f"viessmann-{gw_name}", daemon=True)
+            t.start()
+            viessmann_threads[gw_id] = {"thread": t, "name": gw_name, "file": output_file}
     else:
-        log.warning("ViCare credentials not configured, WS logger disabled")
+        log.warning("ViCare credentials or gateways not configured, WS logger disabled")
 
     log.info("Watchdog active — heartbeat every 60s")
     while True:
@@ -213,26 +237,31 @@ def main():
 
         # Heartbeat
         shelly_ok = "alive" if t_shelly.is_alive() else "DEAD"
-        ws_ok = "alive" if (t_viessmann and t_viessmann.is_alive()) else ("DEAD" if t_viessmann else "off")
         csv_size = os.path.getsize(SHELLY_CSV) if os.path.exists(SHELLY_CSV) else 0
-        jsonl_size = os.path.getsize(VIESSMANN_JSONL) if os.path.exists(VIESSMANN_JSONL) else 0
-        log.info("Heartbeat: shelly=%s (%d rows), viessmann=%s (%d events), "
-                 "csv=%.1fMB, jsonl=%.1fMB",
-                 shelly_ok, shelly_count, ws_ok, viessmann_count,
-                 csv_size / 1048576, jsonl_size / 1048576)
+        ws_parts = []
+        for gw_id, info in viessmann_threads.items():
+            alive = "alive" if info["thread"].is_alive() else "DEAD"
+            count = viessmann_counts.get(gw_id, 0)
+            ws_parts.append(f"{info['name']}={alive}({count})")
+        ws_status = ", ".join(ws_parts) if ws_parts else "off"
+        log.info("Heartbeat: shelly=%s (%d rows), ws=[%s], csv=%.1fMB",
+                 shelly_ok, shelly_count, ws_status, csv_size / 1048576)
 
         if not t_shelly.is_alive():
             log.error("Shelly thread died — restarting")
             t_shelly = threading.Thread(target=shelly_thread, args=(shelly_ip, shelly_hz),
                                         name="shelly", daemon=True)
             t_shelly.start()
-        if t_viessmann and not t_viessmann.is_alive():
-            log.error("Viessmann thread died — restarting")
-            t_viessmann = threading.Thread(
-                target=viessmann_thread,
-                args=(email, password, client_id, gateway_id, ws_timeout),
-                name="viessmann", daemon=True)
-            t_viessmann.start()
+        for gw_id, info in viessmann_threads.items():
+            if not info["thread"].is_alive():
+                gw_name = info["name"]
+                log.error("Viessmann %s thread died — restarting", gw_name)
+                t = threading.Thread(
+                    target=viessmann_thread,
+                    args=(email, password, client_id, gw_id, info["file"], ws_timeout),
+                    name=f"viessmann-{gw_name}", daemon=True)
+                t.start()
+                info["thread"] = t
 
 
 if __name__ == "__main__":

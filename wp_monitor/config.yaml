@@ -1,5 +1,5 @@
 name: WP Monitor
-version: "0.1.3"
+version: "0.2.0"
 slug: wp_monitor
 description: "High-resolution heat pump monitoring (Shelly 1Hz + Viessmann WebSocket)"
 arch:
@@ -15,6 +15,7 @@ options:
   vicare_password: ""
   vicare_client_id: ""
   vicare_gateway_id: ""
+  vicare_gateways: []
   watchdog_timeout_s: 120
 schema:
   shelly_ip: str
@@ -22,5 +23,7 @@ schema:
   vicare_email: str
   vicare_password: password
   vicare_client_id: str
-  vicare_gateway_id: str
+  vicare_gateway_id: str?
+  vicare_gateways:
+    - str
   watchdog_timeout_s: "int(30,600)"
