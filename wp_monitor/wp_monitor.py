@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """WP Monitor — Shelly 3EM + Viessmann WebSocket logger for HA addon."""
 
+import gzip
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -33,6 +35,41 @@ shelly_count = 0
 viessmann_counts = {}  # gateway_id -> count
 
 
+def week_key(t=None):
+    iso = (t or datetime.now()).isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def _gzip_file(path):
+    try:
+        with open(path, "rb") as src, gzip.open(path + ".gz", "wb", compresslevel=6) as dst:
+            shutil.copyfileobj(src, dst)
+        os.remove(path)
+        log.info("Gzipped %s.gz", path)
+    except OSError as e:
+        log.error("Gzip failed for %s: %s", path, e)
+
+
+def rotate_if_new_week(f, path, current_week, header=None):
+    """Rotate file if ISO week changed. Returns (handle, week_key)."""
+    now_week = week_key()
+    if now_week == current_week:
+        return f, current_week
+    f.close()
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        rotated = f"{path}.{current_week}"
+        os.rename(path, rotated)
+        threading.Thread(
+            target=_gzip_file, args=(rotated,), daemon=True,
+            name=f"gzip-{os.path.basename(rotated)}",
+        ).start()
+        log.info("Rotated %s (%s -> %s)", path, current_week, now_week)
+    new_f = open(path, "a", buffering=1)
+    if header:
+        new_f.write(header)
+    return new_f, now_week
+
+
 def load_options():
     with open("/data/options.json") as f:
         return json.load(f)
@@ -50,9 +87,15 @@ def shelly_thread(ip, poll_hz):
     url = f"http://{ip}/rpc/EM.GetStatus?id=0"
     interval = 1.0 / poll_hz
     f = open(SHELLY_CSV, "a", buffering=1)
+    current_week = week_key()
+    last_rot_check = time.time()
     next_tick = time.time()
     while True:
         ts = datetime.now().isoformat(timespec="milliseconds")
+        now = time.time()
+        if now - last_rot_check > 60:
+            last_rot_check = now
+            f, current_week = rotate_if_new_week(f, SHELLY_CSV, current_week, header=CSV_HEADER)
         try:
             with urlopen(url, timeout=2) as resp:
                 d = json.loads(resp.read().decode("utf-8"))
@@ -90,7 +133,9 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
     viessmann_counts[gateway_id] = 0
     token_file = f"/data/token_{gateway_id}.save"
     mgr = ViCareOAuthManager(email, password, client_id, token_file)
-    f = open(output_file, "a", buffering=1)
+    f_holder = [open(output_file, "a", buffering=1)]
+    current_week = [week_key()]
+    last_rot_check = [time.time()]
     gw_short = gateway_id[-6:]
 
     while True:
@@ -150,7 +195,12 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
             vals = {k: v.get("value", v) for k, v in props.items() if isinstance(v, dict)}
             ts = datetime.now().isoformat(timespec="milliseconds")
             record = {"ts": ts, "feature": name, "values": vals}
-            f.write(json.dumps(record, separators=(",", ":")) + "\n")
+            f_holder[0].write(json.dumps(record, separators=(",", ":")) + "\n")
+            now = time.time()
+            if now - last_rot_check[0] > 60:
+                last_rot_check[0] = now
+                f_holder[0], current_week[0] = rotate_if_new_week(
+                    f_holder[0], output_file, current_week[0])
 
         log.info("[%s] WS connecting to %s", gw_short, sub["url"])
         try:

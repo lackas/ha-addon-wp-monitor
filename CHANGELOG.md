@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0 (2026-06-06)
+
+- Weekly log rotation: `shelly_brunnen.csv` and `viessmann_*.jsonl` rotate at the ISO-week boundary (Mon 00:00 local) and are gzipped to `<file>.YYYY-WNN.gz` in the same directory. Archives are kept indefinitely.
+
 ## 0.1.3 (2026-04-29)
 
 - Fix `token_invalid` lockup: trigger `renewToken()` (fresh email/password login) when WS subscription fails with token error, instead of retrying forever
