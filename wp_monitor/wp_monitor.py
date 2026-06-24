@@ -124,8 +124,11 @@ def shelly_thread(ip, poll_hz):
             next_tick = time.time()
 
 
-def viessmann_thread(email, password, client_id, gateway_id, output_file, watchdog_timeout):
-    """WebSocket logger for a single Viessmann gateway. One thread per gateway."""
+def viessmann_thread(email, password, client_id, gateway_id, output_file, watchdog_timeout, stop_event):
+    """WebSocket logger for a single Viessmann gateway. One thread per gateway.
+
+    stop_event: set by the main heartbeat to tell this thread to exit cleanly
+    (used when a stalled-but-alive thread is being replaced)."""
     subs = {"subscriptions": [
         {"id": "0", "type": "device-features", "gatewayId": gateway_id, "version": "2"},
     ]}
@@ -139,6 +142,9 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
     gw_short = gateway_id[-6:]
 
     while True:
+        if stop_event.is_set():
+            log.info("[%s] stop requested — exiting thread", gw_short)
+            return
         try:
             resp = mgr.oauth_session.post(WS_URL, json.dumps(subs), headers=WS_HEADERS, timeout=30)
             if resp.status_code not in (200, 201):
@@ -167,6 +173,13 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
         def watchdog():
             while not stop_watchdog.is_set():
                 if stop_watchdog.wait(30):
+                    return
+                if stop_event.is_set():
+                    log.info("[%s] stop requested — disconnecting", gw_short)
+                    try:
+                        sio.disconnect()
+                    except Exception:
+                        pass
                     return
                 silence = time.time() - last_msg_time[0]
                 if silence > watchdog_timeout:
@@ -249,6 +262,10 @@ def main():
     password = opts.get("vicare_password")
     client_id = opts.get("vicare_client_id")
     ws_timeout = opts.get("watchdog_timeout_s", 120)
+    # Restart a WS thread that is alive but has not delivered any new event for
+    # this many seconds (covers the "stuck in OAuth/subscription retry loop"
+    # lockup, where the thread lives but logs nothing). 0 disables.
+    stale_restart_s = opts.get("ws_stale_restart_s", 300)
 
     # Build gateway list: new "vicare_gateways" (list of "id:name" strings)
     # or legacy "vicare_gateway_id" (single string)
@@ -272,16 +289,19 @@ def main():
             gw_name = gw.get("name", gw_id[-6:]) if isinstance(gw, dict) else gw_id[-6:]
             output_file = os.path.join(OUTPUT_DIR, f"viessmann_{gw_name}.jsonl")
             log.info("Starting Viessmann WS for %s (gateway %s) -> %s", gw_name, gw_id, output_file)
+            stop_ev = threading.Event()
             t = threading.Thread(
                 target=viessmann_thread,
-                args=(email, password, client_id, gw_id, output_file, ws_timeout),
+                args=(email, password, client_id, gw_id, output_file, ws_timeout, stop_ev),
                 name=f"viessmann-{gw_name}", daemon=True)
             t.start()
-            viessmann_threads[gw_id] = {"thread": t, "name": gw_name, "file": output_file}
+            viessmann_threads[gw_id] = {"thread": t, "name": gw_name, "file": output_file,
+                                        "stop": stop_ev, "last_count": 0,
+                                        "last_progress": time.time()}
     else:
         log.warning("ViCare credentials or gateways not configured, WS logger disabled")
 
-    log.info("Watchdog active — heartbeat every 60s")
+    log.info("Watchdog active — heartbeat every 60s, stale-restart after %ss", stale_restart_s)
     while True:
         time.sleep(60)
 
@@ -302,16 +322,33 @@ def main():
             t_shelly = threading.Thread(target=shelly_thread, args=(shelly_ip, shelly_hz),
                                         name="shelly", daemon=True)
             t_shelly.start()
+        now = time.time()
         for gw_id, info in viessmann_threads.items():
-            if not info["thread"].is_alive():
+            count = viessmann_counts.get(gw_id, 0)
+            if count > info["last_count"]:
+                info["last_count"] = count
+                info["last_progress"] = now
+            alive = info["thread"].is_alive()
+            stalled = (stale_restart_s > 0 and alive
+                       and now - info["last_progress"] > stale_restart_s)
+            if not alive or stalled:
                 gw_name = info["name"]
-                log.error("Viessmann %s thread died — restarting", gw_name)
+                reason = ("died" if not alive
+                          else f"stalled {int(now - info['last_progress'])}s without new events")
+                log.error("Viessmann %s thread %s — restarting", gw_name, reason)
+                old_stop = info.get("stop")
+                if old_stop is not None:
+                    old_stop.set()  # tell the old (possibly alive-but-stuck) thread to exit
+                new_stop = threading.Event()
                 t = threading.Thread(
                     target=viessmann_thread,
-                    args=(email, password, client_id, gw_id, info["file"], ws_timeout),
+                    args=(email, password, client_id, gw_id, info["file"], ws_timeout, new_stop),
                     name=f"viessmann-{gw_name}", daemon=True)
                 t.start()
                 info["thread"] = t
+                info["stop"] = new_stop
+                info["last_count"] = viessmann_counts.get(gw_id, 0)
+                info["last_progress"] = now
 
 
 if __name__ == "__main__":

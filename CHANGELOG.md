@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 (2026-06-24)
+
+- Auto-recover stalled WebSocket threads: the heartbeat now restarts a Viessmann WS thread that is *alive but delivering no new events* (e.g. stuck in the OAuth/subscription retry loop), not only threads that have died. Controlled by new option `ws_stale_restart_s` (default 300s, 0 disables). The old thread is signalled to stop cleanly first to avoid a duplicate writer. Fixes silent multi-day gaps in `viessmann_*.jsonl`.
+
 ## 0.3.0 (2026-06-06)
 
 - Weekly log rotation: `shelly_brunnen.csv` and `viessmann_*.jsonl` rotate at the ISO-week boundary (Mon 00:00 local) and are gzipped to `<file>.YYYY-WNN.gz` in the same directory. Archives are kept indefinitely.
