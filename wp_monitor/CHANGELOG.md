@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 (2026-06-24)
+
+- Log the running addon version on startup (`WP Monitor vX.Y.Z starting`), read from `config.yaml` (now copied into the image). Makes it obvious in the log which version is actually live.
+
 ## 0.4.0 (2026-06-24)
 
 - Auto-recover stalled WebSocket threads: the heartbeat now restarts a Viessmann WS thread that is *alive but delivering no new events* (e.g. stuck in the OAuth/subscription retry loop), not only threads that have died. Controlled by new option `ws_stale_restart_s` (default 300s, 0 disables). The old thread is signalled to stop cleanly first to avoid a duplicate writer. Fixes silent multi-day gaps in `viessmann_*.jsonl`.

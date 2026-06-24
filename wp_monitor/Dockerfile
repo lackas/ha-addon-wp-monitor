@@ -8,6 +8,7 @@ RUN pip3 install --no-cache-dir \
     websocket-client==1.8.0
 
 COPY wp_monitor.py /
+COPY config.yaml /
 COPY PyViCareLive/ /PyViCareLive/
 
 ENTRYPOINT ["python3", "-u", "/wp_monitor.py"]

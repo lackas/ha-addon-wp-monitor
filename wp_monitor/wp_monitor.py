@@ -35,6 +35,23 @@ shelly_count = 0
 viessmann_counts = {}  # gateway_id -> count
 
 
+def read_version():
+    """Read addon version from config.yaml (copied into the image at /config.yaml).
+    Single source of truth — no separate constant to keep in sync."""
+    for path in ("/config.yaml", os.path.join(os.path.dirname(__file__), "config.yaml")):
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.strip().startswith("version:"):
+                        return line.split(":", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            continue
+    return "unknown"
+
+
+VERSION = read_version()
+
+
 def week_key(t=None):
     iso = (t or datetime.now()).isocalendar()
     return f"{iso[0]}-W{iso[1]:02d}"
@@ -251,6 +268,7 @@ def main():
     shelly_hz = opts.get("shelly_poll_hz", 1)
     ws_timeout = opts.get("watchdog_timeout_s", 120)
 
+    log.info("WP Monitor v%s starting", VERSION)
     log.info("Starting WP Monitor — Shelly %s @ %d Hz", shelly_ip, shelly_hz)
 
     t_shelly = threading.Thread(target=shelly_thread, args=(shelly_ip, shelly_hz),
