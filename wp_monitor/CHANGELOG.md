@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-10-17)
+
+- Hourly `collect.py`: copies the HA history of about 35 heat pump, energy and weather sensors into `/share/wp-monitor/data.db`, because HA itself keeps only 10 days.
+- Daily report at 06:10 (`wp_daily_report.py`) for the previous day, sent through the HA service `notify.mail`. A marker in `/data` prevents a second mail after a restart.
+- Both jobs ran on a laptop before. They use the Supervisor API now (`homeassistant_api: true`) and run as separate processes, so a crash does not touch the loggers.
+
 ## 0.4.1 (2026-06-24)
 
 - Log the running addon version on startup (`WP Monitor vX.Y.Z starting`), read from `config.yaml` (now copied into the image). Makes it obvious in the log which version is actually live.

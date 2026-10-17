@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import shutil
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -29,6 +31,9 @@ CSV_HEADER = "ts,total_w,a_w,b_w,c_w,a_a,b_a,c_a,a_v,b_v,c_v\n"
 
 WS_URL = "https://api.viessmann-climatesolutions.com/live-updates/v1/iot"
 WS_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
+
+# Marker im Addon-Speicher, damit ein Neustart nach 06:10 nicht doppelt mailt
+REPORT_MARK = "/data/last_report"
 
 # Shared counters for watchdog heartbeat
 shelly_count = 0
@@ -260,6 +265,37 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
             time.sleep(60)
 
 
+def run_job(name, script):
+    """Script als eigenen Prozess starten, ein Absturz trifft so nicht die Logger."""
+    def target():
+        log.info("%s starting", name)
+        r = subprocess.run([sys.executable, script], capture_output=True, text=True)
+        lines = (r.stdout + r.stderr).strip().splitlines()
+        level = logging.INFO if r.returncode == 0 else logging.ERROR
+        log.log(level, "%s finished rc=%d: %s", name, r.returncode, lines[-1] if lines else "")
+    threading.Thread(target=target, name=name, daemon=True).start()
+
+
+def schedule_jobs(state):
+    now = datetime.now()
+    # HA behaelt nur 10 Tage Historie, collect sichert sie stuendlich in data.db.
+    hour = now.strftime("%Y-%m-%d %H")
+    if now.minute >= 5 and state.get("collect") != hour:
+        state["collect"] = hour
+        run_job("collect", "/collect.py")
+    today = now.date().isoformat()
+    if (now.hour, now.minute) >= (6, 10):
+        try:
+            with open(REPORT_MARK) as f:
+                last = f.read().strip()
+        except OSError:
+            last = ""
+        if last != today:
+            with open(REPORT_MARK, "w") as f:
+                f.write(today)
+            run_job("daily-report", "/wp_daily_report.py")
+
+
 def main():
     opts = load_options()
     setup_output_dir()
@@ -320,8 +356,10 @@ def main():
         log.warning("ViCare credentials or gateways not configured, WS logger disabled")
 
     log.info("Watchdog active — heartbeat every 60s, stale-restart after %ss", stale_restart_s)
+    jobs = {}
     while True:
         time.sleep(60)
+        schedule_jobs(jobs)
 
         # Heartbeat
         shelly_ok = "alive" if t_shelly.is_alive() else "DEAD"

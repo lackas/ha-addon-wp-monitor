@@ -7,7 +7,7 @@ RUN pip3 install --no-cache-dir \
     python-socketio==5.12.1 \
     websocket-client==1.8.0
 
-COPY wp_monitor.py /
+COPY wp_monitor.py collect.py wp_daily_report.py /
 COPY config.yaml /
 COPY PyViCareLive/ /PyViCareLive/
 
