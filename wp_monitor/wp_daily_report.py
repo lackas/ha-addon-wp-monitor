@@ -4,7 +4,7 @@ Energie kommt aus den Wochenzählern der WP (Strom und Wärme je für WW und Hei
 Reset montags). errorCode 6c = Regelhochdruck, nicht der Strömungswächter,
 Codetabelle docs/wp-fehlercodes.md.
 
-Läuft täglich um 06:10 im Addon und verschickt über den HA-Dienst notify.mail.
+Läuft täglich um 06:10 im Addon und verschickt über die Notify-Entity der SMTP-Integration.
 Außerhalb davon WP_SHARE, HA_URL und HA_TOKEN_PATH setzen, --dry-run verschickt nichts.
 """
 import bisect
@@ -22,7 +22,7 @@ SHELLY_CSV = SHARE / "shelly_brunnen.csv"
 
 PUMP_W = 380  # Brunnenpumpe, gemessen
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
-MAIL_SERVICE = os.environ.get("MAIL_SERVICE", "notify/mail")
+MAIL_ENTITY = os.environ.get("MAIL_ENTITY", "notify.mail_lackas_gmail_com")
 
 
 def ha_token():
@@ -34,8 +34,8 @@ def send_mail(subject, body):
     import urllib.request
 
     req = urllib.request.Request(
-        f"{HA_URL}/api/services/{MAIL_SERVICE}",
-        data=json.dumps({"title": subject, "message": body}).encode(),
+        f"{HA_URL}/api/services/notify/send_message",
+        data=json.dumps({"entity_id": MAIL_ENTITY, "title": subject, "message": body}).encode(),
         headers={"Authorization": f"Bearer {ha_token()}", "Content-Type": "application/json"},
     )
     urllib.request.urlopen(req, timeout=60)
@@ -392,6 +392,6 @@ if r["fails"]:
 print(f"\n=== Mail-Subject ===\n{subject}\n\n=== Mail-Body ===\n{body}")
 if "--dry-run" not in sys.argv:
     send_mail(subject=subject, body=body)
-    print(f"\nMail verschickt über {MAIL_SERVICE}")
+    print(f"\nMail verschickt über {MAIL_ENTITY}")
 else:
     print("\n[Dry-Run] Mail nicht verschickt.")

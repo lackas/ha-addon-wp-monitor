@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (2026-10-17)
+
+- Daily report mails through `notify.send_message` on the SMTP notify entity (`MAIL_ENTITY`, default `notify.mail_lackas_gmail_com`) instead of the legacy `notify.mail` action, which HA removes in 2027.3.
+
 ## 0.5.0 (2026-10-17)
 
 - Hourly `collect.py`: copies the HA history of about 35 heat pump, energy and weather sensors into `/share/wp-monitor/data.db`, because HA itself keeps only 10 days.
