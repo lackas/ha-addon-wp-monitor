@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.6.1 (2026-10-30)
+
+- `sensor.vx3_akku_ausnahme` from `ess.battery.state` replaces `binary_sensor.vx3_akku_sleep_mode`, which the VX3 hardly ever sends. Shows `noException`, `batterySleepMode`, `batteryDeepDischargeRecharge` or a combination.
+
 ## 0.6.0 (2026-10-30)
 
-- Mirrors values that only the app client (scope Internal) gets into Home Assistant states through the Supervisor API: `sensor.wp_live_waermeleistung`, `sensor.wp_live_stromleistung` and `sensor.wp_live_cop` for the heat pump compressor, `sensor.vx3_akku_modul_{0..5}_soh`, `_innenwiderstand` and `_zyklen` per battery module, and `binary_sensor.vx3_akku_sleep_mode`.
+- Mirrors values that only the app client (scope Internal) gets into Home Assistant states through the Supervisor API: `sensor.wp_live_waermeleistung`, `sensor.wp_live_stromleistung` and `sensor.wp_live_cop` for the heat pump compressor, `sensor.vx3_akku_modul_{0..5}_soh`, `_innenwiderstand` and `_zyklen` per battery module and `binary_sensor.vx3_akku_sleep_mode`.
 - The heat pump gateway sends compressor power only on subscribe, so it is polled every `wp_poll_s` seconds (new option, default 300, 0 disables), two API calls each time. The battery values come from the existing WebSocket stream.
 - HA forgets these states on restart, so they are sent again every 15 minutes.
 

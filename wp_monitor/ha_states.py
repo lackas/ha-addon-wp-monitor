@@ -74,9 +74,12 @@ def states_for(feature, vals):
             (f"sensor.vx3_akku_modul_{n}_zyklen", vals.get("cycleDischarge"),
              _attrs(f"VX3 Akku Modul {n} Zyklen", state_class="total_increasing", icon="mdi:battery-sync")),
         ]
-    if feature == "ess.features.batterySleepMode" and "active" in vals:
-        return [("binary_sensor.vx3_akku_sleep_mode", "on" if vals.get("active") else "off",
-                 {"friendly_name": "VX3 Akku Sleep-Mode", "icon": "mdi:sleep"})]
+    # Tells a standby from batterySleepMode apart from the pccControlMode hang,
+    # which runs with noException, see docs/vx3-akku-pcc-modus.md in ha-config.
+    if feature == "ess.battery.state" and vals.get("exception"):
+        exceptions = sorted(e for e in vals["exception"] if e != "noException")
+        return [("sensor.vx3_akku_ausnahme", ", ".join(exceptions) or "noException",
+                 {"friendly_name": "VX3 Akku Ausnahme", "icon": "mdi:battery-alert-variant-outline"})]
     return []
 
 
