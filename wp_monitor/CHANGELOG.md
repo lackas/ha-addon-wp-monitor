@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 (2026-10-30)
+
+- Read `ess.battery.state` once at startup. The VX3 sends it only when it changes, so `sensor.vx3_akku_ausnahme` stayed empty for hours after a restart.
+
 ## 0.6.1 (2026-10-30)
 
 - `sensor.vx3_akku_ausnahme` from `ess.battery.state` replaces `binary_sensor.vx3_akku_sleep_mode`, which the VX3 hardly ever sends. Shows `noException`, `batterySleepMode`, `batteryDeepDischargeRecharge` or a combination.

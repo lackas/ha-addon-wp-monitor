@@ -121,22 +121,25 @@ def start_sender():
     threading.Thread(target=_sender, name="ha-states", daemon=True).start()
 
 
-def wp_poll_thread(login, gateway_id, interval):
+def wp_poll_thread(login, wp_gateway, vx_gateway, interval):
     """The heat pump gateway sends compressor power only on subscribe, so poll it.
 
-    The server refreshes these values about once a minute."""
+    The server refreshes these values about once a minute. The battery state
+    arrives only when it changes, which can take hours, so it is read once."""
     mgr = installation = None
+    once = [(vx_gateway, "ess.battery.state")] if vx_gateway else []
     while True:
         try:
             if mgr is None:
                 mgr = login()
             if installation is None:
                 installation = mgr.get("/equipment/installations")["data"][0]["id"]
-            for feature in WP_POLL_FEATURES:
-                data = mgr.get(f"/features/installations/{installation}/gateways/{gateway_id}"
+            for gateway, feature in once + [(wp_gateway, f) for f in WP_POLL_FEATURES]:
+                data = mgr.get(f"/features/installations/{installation}/gateways/{gateway}"
                                f"/devices/0/features/{feature}")["data"]
                 vals = {k: v.get("value") for k, v in data["properties"].items()}
                 publish(feature, vals)
+            once = []
         except Exception as e:
             log.warning("WP poll failed: %s", e)
         time.sleep(interval)

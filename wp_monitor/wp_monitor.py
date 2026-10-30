@@ -364,9 +364,10 @@ def main():
     ha_states.start_sender()
     wp_poll_s = opts.get("wp_poll_s", 300)
     wp_gateway = next((gw["id"] for gw in gateways if gw["name"] == "wp"), None)
+    vx_gateway = next((gw["id"] for gw in gateways if gw["name"] == "vitocharge"), None)
     if email and password and wp_gateway and wp_poll_s:
         login = lambda: ViCareOAuthManager(email, password, client_id, "/data/token_poll.save")
-        threading.Thread(target=ha_states.wp_poll_thread, args=(login, wp_gateway, wp_poll_s),
+        threading.Thread(target=ha_states.wp_poll_thread, args=(login, wp_gateway, vx_gateway, wp_poll_s),
                          name="wp-poll", daemon=True).start()
         log.info("Polling WP compressor power every %ss", wp_poll_s)
 
