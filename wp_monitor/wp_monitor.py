@@ -18,6 +18,8 @@ import requests
 import socketio
 from PyViCareLive.PyViCareOAuthManager import ViCareOAuthManager
 
+import ha_states
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(threadName)s] %(levelname)s %(message)s",
@@ -231,6 +233,10 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
             ts = datetime.now().isoformat(timespec="milliseconds")
             record = {"ts": ts, "feature": name, "values": vals}
             f_holder[0].write(json.dumps(record, separators=(",", ":")) + "\n")
+            try:
+                ha_states.publish(name, vals)
+            except Exception as e:
+                log.warning("[%s] HA state for %s failed: %s", gw_short, name, e)
             now = time.time()
             if now - last_rot_check[0] > 60:
                 last_rot_check[0] = now
@@ -355,11 +361,22 @@ def main():
     else:
         log.warning("ViCare credentials or gateways not configured, WS logger disabled")
 
+    ha_states.start_sender()
+    wp_poll_s = opts.get("wp_poll_s", 300)
+    wp_gateway = next((gw["id"] for gw in gateways if gw["name"] == "wp"), None)
+    if email and password and wp_gateway and wp_poll_s:
+        login = lambda: ViCareOAuthManager(email, password, client_id, "/data/token_poll.save")
+        threading.Thread(target=ha_states.wp_poll_thread, args=(login, wp_gateway, wp_poll_s),
+                         name="wp-poll", daemon=True).start()
+        log.info("Polling WP compressor power every %ss", wp_poll_s)
+
     log.info("Watchdog active — heartbeat every 60s, stale-restart after %ss", stale_restart_s)
     jobs = {}
     while True:
         time.sleep(60)
         schedule_jobs(jobs)
+        if datetime.now().minute % 15 == 0:
+            ha_states.republish()
 
         # Heartbeat
         shelly_ok = "alive" if t_shelly.is_alive() else "DEAD"
