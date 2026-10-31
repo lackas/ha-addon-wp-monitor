@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4 (2026-10-31)
+
+- Weekly sums of the compressor per mode: `sensor.wp_woche_waerme_heizen`, `_waerme_warmwasser`, `_strom_heizen`, `_strom_warmwasser` (kWh, `total_increasing`, reset every Monday 00:00) and `sensor.wp_woche_az_heizen` / `_warmwasser`. The heat pump does not push them reliably.
+- The heat pump poll is a single call with the API's `regex` filter, for the current power and the weekly sums alike.
+
 ## 0.6.3 (2026-10-31)
 
 - `sensor.vx3_einspeisegrenze`, `sensor.vx3_verbrauchsgrenze` and their `_status` sensors from `device.power.statusReport.production` and `.consumption`, the limits the gridBox writes over EEBUS. Read once at startup like the battery state, then from the WebSocket stream.

@@ -12,16 +12,15 @@ import queue
 import re
 import threading
 import time
+from urllib.parse import quote
 
 import requests
 
 log = logging.getLogger("wp_monitor")
 
 HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
-WP_POLL_FEATURES = (
-    "heating.compressors.0.heat.production.current",
-    "heating.compressors.0.power.consumption.current",
-)
+# One call for the compressor's current power and the weekly sums per mode.
+WP_POLL_REGEX = r"heating\.compressors\.0\.(heat\.production|power\.consumption)\..*"
 
 # The VX3 sends these only when they change, which can take hours or days.
 ONCE_VX_FEATURES = (
@@ -67,6 +66,20 @@ def states_for(feature, vals):
         return [
             ("sensor.wp_live_stromleistung", _raw["power"], _attrs("WP Stromleistung", "W", "power")),
             _cop(),
+        ]
+    m = re.fullmatch(r"heating\.compressors\.0\.(heat\.production|power\.consumption)\.(heating|dhw)\.week", feature)
+    if m:
+        kind = "waerme" if m.group(1) == "heat.production" else "strom"
+        mode, label = ("heizen", "Heizen") if m.group(2) == "heating" else ("warmwasser", "Warmwasser")
+        _raw[(kind, mode)] = value
+        heat, power = _raw.get(("waerme", mode)), _raw.get(("strom", mode))
+        # Early in the week the sums are too small for a meaningful ratio.
+        az = round(heat / power, 2) if heat is not None and power and power >= 0.5 else "unknown"
+        return [
+            (f"sensor.wp_woche_{kind}_{mode}", value,
+             _attrs(f"WP {'Wärme' if kind == 'waerme' else 'Strom'} {label} Woche", "kWh", "energy",
+                    "total_increasing")),
+            (f"sensor.wp_woche_az_{mode}", az, _attrs(f"WP Arbeitszahl {label} Woche", icon="mdi:heat-pump")),
         ]
     m = re.fullmatch(r"ess\.battery\.(\d+)\.information", feature)
     if m:
@@ -151,12 +164,13 @@ def wp_poll_thread(login, wp_gateway, vx_gateway, interval):
                 mgr = login()
             if installation is None:
                 installation = mgr.get("/equipment/installations")["data"][0]["id"]
-            for gateway, feature in once + [(wp_gateway, f) for f in WP_POLL_FEATURES]:
-                data = mgr.get(f"/features/installations/{installation}/gateways/{gateway}"
-                               f"/devices/0/features/{feature}")["data"]
-                vals = {k: v.get("value") for k, v in data["properties"].items()}
-                publish(feature, vals)
+            base = f"/features/installations/{installation}/gateways"
+            for gateway, feature in once:
+                data = mgr.get(f"{base}/{gateway}/devices/0/features/{feature}")["data"]
+                publish(feature, {k: v.get("value") for k, v in data["properties"].items()})
             once = []
+            for data in mgr.get(f"{base}/{wp_gateway}/devices/0/features?regex={quote(WP_POLL_REGEX)}")["data"]:
+                publish(data["feature"], {k: v.get("value") for k, v in data["properties"].items()})
         except Exception as e:
             log.warning("WP poll failed: %s", e)
         time.sleep(interval)
