@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 (2026-10-31)
+
+- `sensor.vx3_einspeisegrenze`, `sensor.vx3_verbrauchsgrenze` and their `_status` sensors from `device.power.statusReport.production` and `.consumption`, the limits the gridBox writes over EEBUS. Read once at startup like the battery state, then from the WebSocket stream.
+
 ## 0.6.2 (2026-10-30)
 
 - Read `ess.battery.state` once at startup. The VX3 sends it only when it changes, so `sensor.vx3_akku_ausnahme` stayed empty for hours after a restart.

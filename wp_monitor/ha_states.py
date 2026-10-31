@@ -23,6 +23,13 @@ WP_POLL_FEATURES = (
     "heating.compressors.0.power.consumption.current",
 )
 
+# The VX3 sends these only when they change, which can take hours or days.
+ONCE_VX_FEATURES = (
+    "ess.battery.state",
+    "device.power.statusReport.production",
+    "device.power.statusReport.consumption",
+)
+
 _queue = queue.Queue()
 _published = {}  # entity_id -> (state, attributes)
 _raw = {}  # values derived states are computed from
@@ -80,6 +87,16 @@ def states_for(feature, vals):
         exceptions = sorted(e for e in vals["exception"] if e != "noException")
         return [("sensor.vx3_akku_ausnahme", ", ".join(exceptions) or "noException",
                  {"friendly_name": "VX3 Akku Ausnahme", "icon": "mdi:battery-alert-variant-outline"})]
+    # Who sets pccControlMode is open; the gridBox writes these limits over EEBUS,
+    # so their history next to sensor.vx3_akku_steuermodus may show it.
+    for name, label, entity in (("production", "Einspeisegrenze", "einspeisegrenze"),
+                                ("consumption", "Verbrauchsgrenze", "verbrauchsgrenze")):
+        if feature == f"device.power.statusReport.{name}" and "status" in vals:
+            return [
+                (f"sensor.vx3_{entity}_status", vals["status"],
+                 {"friendly_name": f"VX3 {label} Status", "icon": "mdi:transmission-tower"}),
+                (f"sensor.vx3_{entity}", vals.get("limit"), _attrs(f"VX3 {label}", "W", "power")),
+            ]
     return []
 
 
@@ -124,10 +141,10 @@ def start_sender():
 def wp_poll_thread(login, wp_gateway, vx_gateway, interval):
     """The heat pump gateway sends compressor power only on subscribe, so poll it.
 
-    The server refreshes these values about once a minute. The battery state
-    arrives only when it changes, which can take hours, so it is read once."""
+    The server refreshes these values about once a minute. ONCE_VX_FEATURES are
+    read once at startup."""
     mgr = installation = None
-    once = [(vx_gateway, "ess.battery.state")] if vx_gateway else []
+    once = [(vx_gateway, f) for f in ONCE_VX_FEATURES] if vx_gateway else []
     while True:
         try:
             if mgr is None:
