@@ -140,6 +140,10 @@ def _sender():
             r = session.post(f"{HA_URL}/api/states/{entity_id}",
                              json={"state": state, "attributes": attrs}, timeout=10)
             r.raise_for_status()
+            # First success after failures: HA is back from a restart, send all again.
+            if failed_at:
+                failed_at = 0
+                republish()
         except Exception as e:
             # One line per 10 minutes is enough while HA restarts.
             if time.time() - failed_at > 600:

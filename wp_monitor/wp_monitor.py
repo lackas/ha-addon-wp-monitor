@@ -384,10 +384,13 @@ def main():
 
     log.info("Watchdog active — heartbeat every 60s, stale-restart after %ss", stale_restart_s)
     jobs = {}
+    republished = time.monotonic()
     while True:
         time.sleep(60)
         schedule_jobs(jobs)
-        if datetime.now().minute % 15 == 0:
+        # Not minute % 15: the loop drifts past 60 s and skips minutes.
+        if time.monotonic() - republished >= 900:
+            republished = time.monotonic()
             ha_states.republish()
 
         # Heartbeat

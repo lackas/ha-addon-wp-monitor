@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6 (2026-11-01)
+
+- States are sent again as soon as HA is back after a restart, and every 15 minutes on a timer. The minute check before missed slots, so rarely changing values like `sensor.vx3_akku_ausnahme` stayed missing after an HA restart.
+
 ## 0.6.5 (2026-11-01)
 
 - The VX3 subscription also covers its `EEBUS` and `gateway` devices, to see what the gridBox does when the battery control mode jumps. Their records carry a `device` field; records of device 0 stay as they were. Only device 0 goes to the HA states.
