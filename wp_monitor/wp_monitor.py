@@ -37,6 +37,11 @@ WS_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 # Marker im Addon-Speicher, damit ein Neustart nach 06:10 nicht doppelt mailt
 REPORT_MARK = "/data/last_report"
 
+# Further devices per gateway name. The VX3 talks to the gridBox through its
+# EEBUS device; who sets pccControlMode is open (docs/vx3-akku-pcc-modus.md in
+# ha-config), so log those events too.
+EXTRA_DEVICES = {"vitocharge": ("EEBUS", "gateway")}
+
 # Shared counters for watchdog heartbeat
 shelly_count = 0
 viessmann_counts = {}  # gateway_id -> count
@@ -148,13 +153,14 @@ def shelly_thread(ip, poll_hz):
             next_tick = time.time()
 
 
-def viessmann_thread(email, password, client_id, gateway_id, output_file, watchdog_timeout, stop_event):
+def viessmann_thread(email, password, client_id, gateway_id, output_file, watchdog_timeout, stop_event,
+                     devices=("0",)):
     """WebSocket logger for a single Viessmann gateway. One thread per gateway.
 
     stop_event: set by the main heartbeat to tell this thread to exit cleanly
     (used when a stalled-but-alive thread is being replaced)."""
     subs = {"subscriptions": [
-        {"id": "0", "type": "device-features", "gatewayId": gateway_id, "version": "2"},
+        {"id": d, "type": "device-features", "gatewayId": gateway_id, "version": "2"} for d in devices
     ]}
     global viessmann_counts
     viessmann_counts[gateway_id] = 0
@@ -232,11 +238,15 @@ def viessmann_thread(email, password, client_id, gateway_id, output_file, watchd
             vals = {k: v.get("value", v) for k, v in props.items() if isinstance(v, dict)}
             ts = datetime.now().isoformat(timespec="milliseconds")
             record = {"ts": ts, "feature": name, "values": vals}
+            device = feat.get("deviceId", "0")
+            if device != "0":
+                record["device"] = device
             f_holder[0].write(json.dumps(record, separators=(",", ":")) + "\n")
-            try:
-                ha_states.publish(name, vals)
-            except Exception as e:
-                log.warning("[%s] HA state for %s failed: %s", gw_short, name, e)
+            if device == "0":
+                try:
+                    ha_states.publish(name, vals)
+                except Exception as e:
+                    log.warning("[%s] HA state for %s failed: %s", gw_short, name, e)
             now = time.time()
             if now - last_rot_check[0] > 60:
                 last_rot_check[0] = now
@@ -352,7 +362,8 @@ def main():
             stop_ev = threading.Event()
             t = threading.Thread(
                 target=viessmann_thread,
-                args=(email, password, client_id, gw_id, output_file, ws_timeout, stop_ev),
+                args=(email, password, client_id, gw_id, output_file, ws_timeout, stop_ev,
+                      ("0",) + EXTRA_DEVICES.get(gw_name, ())),
                 name=f"viessmann-{gw_name}", daemon=True)
             t.start()
             viessmann_threads[gw_id] = {"thread": t, "name": gw_name, "file": output_file,
@@ -416,7 +427,8 @@ def main():
                 new_stop = threading.Event()
                 t = threading.Thread(
                     target=viessmann_thread,
-                    args=(email, password, client_id, gw_id, info["file"], ws_timeout, new_stop),
+                    args=(email, password, client_id, gw_id, info["file"], ws_timeout, new_stop,
+                          ("0",) + EXTRA_DEVICES.get(gw_name, ())),
                     name=f"viessmann-{gw_name}", daemon=True)
                 t.start()
                 info["thread"] = t

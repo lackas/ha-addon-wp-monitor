@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.5 (2026-11-01)
+
+- The VX3 subscription also covers its `EEBUS` and `gateway` devices, to see what the gridBox does when the battery control mode jumps. Their records carry a `device` field; records of device 0 stay as they were. Only device 0 goes to the HA states.
+
 ## 0.6.4 (2026-10-31)
 
 - Weekly sums of the compressor per mode: `sensor.wp_woche_waerme_heizen`, `_waerme_warmwasser`, `_strom_heizen`, `_strom_warmwasser` (kWh, `total_increasing`, reset every Monday 00:00) and `sensor.wp_woche_az_heizen` / `_warmwasser`. The heat pump does not push them reliably.
