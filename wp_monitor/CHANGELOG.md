@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.7 (2026-11-01)
+
+- The battery module values (`sensor.vx3_akku_modul_*`) are read at startup too, in the same single call as the other rarely changing VX3 values. The VX3 sends them only when they change, so after a restart of the app they were missing until then, and Spook offered to delete their long-term statistics.
+
 ## 0.6.6 (2026-11-01)
 
 - States are sent again as soon as HA is back after a restart, and every 15 minutes on a timer. The minute check before missed slots, so rarely changing values like `sensor.vx3_akku_ausnahme` stayed missing after an HA restart.

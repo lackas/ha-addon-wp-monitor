@@ -22,12 +22,9 @@ HA_URL = os.environ.get("HA_URL", "http://supervisor/core")
 # One call for the compressor's current power and the weekly sums per mode.
 WP_POLL_REGEX = r"heating\.compressors\.0\.(heat\.production|power\.consumption)\..*"
 
-# The VX3 sends these only when they change, which can take hours or days.
-ONCE_VX_FEATURES = (
-    "ess.battery.state",
-    "device.power.statusReport.production",
-    "device.power.statusReport.consumption",
-)
+# The VX3 sends these only when they change, which can take hours or days,
+# so they are read once at startup.
+ONCE_VX_REGEX = r"ess\.battery\.(state|\d+\.information)|device\.power\.statusReport\.(production|consumption)"
 
 _queue = queue.Queue()
 _published = {}  # entity_id -> (state, attributes)
@@ -158,10 +155,10 @@ def start_sender():
 def wp_poll_thread(login, wp_gateway, vx_gateway, interval):
     """The heat pump gateway sends compressor power only on subscribe, so poll it.
 
-    The server refreshes these values about once a minute. ONCE_VX_FEATURES are
+    The server refreshes these values about once a minute. ONCE_VX_REGEX is
     read once at startup."""
     mgr = installation = None
-    once = [(vx_gateway, f) for f in ONCE_VX_FEATURES] if vx_gateway else []
+    once = bool(vx_gateway)
     while True:
         try:
             if mgr is None:
@@ -169,10 +166,10 @@ def wp_poll_thread(login, wp_gateway, vx_gateway, interval):
             if installation is None:
                 installation = mgr.get("/equipment/installations")["data"][0]["id"]
             base = f"/features/installations/{installation}/gateways"
-            for gateway, feature in once:
-                data = mgr.get(f"{base}/{gateway}/devices/0/features/{feature}")["data"]
-                publish(feature, {k: v.get("value") for k, v in data["properties"].items()})
-            once = []
+            if once:
+                for data in mgr.get(f"{base}/{vx_gateway}/devices/0/features?regex={quote(ONCE_VX_REGEX)}")["data"]:
+                    publish(data["feature"], {k: v.get("value") for k, v in data["properties"].items()})
+                once = False
             for data in mgr.get(f"{base}/{wp_gateway}/devices/0/features?regex={quote(WP_POLL_REGEX)}")["data"]:
                 publish(data["feature"], {k: v.get("value") for k, v in data["properties"].items()})
         except Exception as e:
