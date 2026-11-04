@@ -71,7 +71,7 @@ def read_lines(base, day_str):
         yield from _cache[f]
 
 
-def segments(series, wanted):
+def segments(series, wanted, end=None):
     """Zeitabschnitte, in denen der Wert in `wanted` liegt."""
     out, cur_s, cur_v = [], None, None
     for ts, v in sorted(series):
@@ -84,6 +84,8 @@ def segments(series, wanted):
         elif cur_s is not None:
             out.append((cur_s, ts, cur_v))
             cur_s = None
+    if cur_s is not None and end is not None:  # läuft über Mitternacht weiter
+        out.append((cur_s, end, cur_v))
     return out
 
 
@@ -128,7 +130,8 @@ def collect_day(day_str):
         elif feat == "heating.circuits.1.temperature" and val:  # 0 = Heizen aus
             vl_soll.append((ts, val))
         elif feat == "heating.compressors.0.heatTarget" and val is not None:
-            target.append((ts, val))
+            # In der Heizperiode heißt eine WW-Ladung dhwAndHeating.
+            target.append((ts, "dhw" if val == "dhwAndHeating" else val))
         elif feat == "heating.compressors.0.power.consumption.current" and val is not None:
             comp_p.append((ts, val))
         elif feat == "heating.compressors.0.statistics" and v.get("starts") is not None:
@@ -149,6 +152,7 @@ def collect_day(day_str):
                 if dt.date() == date.fromisoformat(day_str):
                     err6c.add(dt)
 
+    day_end = min(datetime.fromisoformat(day_str) + timedelta(days=1), datetime.now())
     comp_seq = sorted(comp_p)
     comp_ts = [t for t, _ in comp_seq]
     comp_kw = [v for _, v in comp_seq]
@@ -161,7 +165,7 @@ def collect_day(day_str):
     # der frühere 60-s-Boost-Abbruch) ist kein Lauf.
     runs = [
         {"start": s, "end": e, "type": t, "dur": (e - s).total_seconds() / 60}
-        for s, e, t in segments(target, {"dhw", "heating"})
+        for s, e, t in segments(target, {"dhw", "heating"}, day_end)
         if comp_running(s) or any(s <= ct <= e and kw > 0.1 for ct, kw in comp_seq)
     ]
     # Unter 4 min oder mit 6c gilt ein Lauf als Fehlstart.
@@ -203,7 +207,8 @@ def collect_day(day_str):
 
     # WW-Ladungen nach mindestens 8 min Leerlauf hat die Automation ausgelöst.
     for x in runs:
-        x["after_idle"] = x["type"] == "dhw" and any(
+        # Ladungen während eines Heizlaufs (dhwAndHeating) kamen nicht aus dem Leerlauf.
+        x["after_idle"] = x["type"] == "dhw" and not comp_running(x["start"] - timedelta(minutes=1)) and any(
             s <= x["start"] - timedelta(minutes=8) and x["start"] <= e for s, e in pump_runs
         )
 

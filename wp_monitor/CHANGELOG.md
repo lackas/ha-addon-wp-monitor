@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8 (2026-11-04)
+
+- Daily report: a hot water load during a heating run (`heatTarget` `dhwAndHeating`) counts as a hot water load. In the heating season the report showed `WW 0×` although the tank was loaded two or three times a day. Such loads no longer count as "after idle".
+- Daily report: a run still going at midnight is listed up to 00:00. Before, the last run of the day was dropped.
+
 ## 0.6.7 (2026-11-01)
 
 - The battery module values (`sensor.vx3_akku_modul_*`) are read at startup too, in the same single call as the other rarely changing VX3 values. The VX3 sends them only when they change, so after a restart of the app they were missing until then, and Spook offered to delete their long-term statistics.
